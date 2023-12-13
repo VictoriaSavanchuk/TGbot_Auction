@@ -6,6 +6,7 @@ from telebot.types import InputMediaPhoto
 import gspread
 import json
 import sqlite3 as sl
+from keyboards import * 
 
 with open ('config.json') as settings:
     config = json.load(settings)
@@ -22,9 +23,66 @@ con = sl.connect(database, check_same_thread=False)     #check_same_thread=False
 # создаю словарь для обновления админ
 administrators_dict = {}
 # текущие лоты, кот учавствуют в аукционе
-buffer = {}
+buffer = {
+    "Lots_to_add": [],  # Перед постом добавляются id лотов для проверки через "Moderation"
+    "Moderation": {},  # Лоты которые, отправляются всем админам со статусом SUPER_ADMIN или SUPPORT
+    "Approved": [],  # Лоты которые, будут отправляться на канал
+    "Active": {}  # Лоты которые уже находятся на канале
+}
+
 #регистрация обработчика для получения текста, через название кнопки
-handler_register =[]         
+handler_register =[]       
+
+with con:
+    admin_for_top_up_your_balance = con.execute(queries['find_admin_for_top_up_your_balance']).fetchone()
+    #print(admin_for_top_up_your_balance)  #('@Zenagar',)
+    texts_dict = { "create_lot": "Заполните всю необходимую информацию о новом лоте:\n",
+               "recreate_lot": "Выберите лоты из которых необходимо пересоздать лот",
+                "customers": "Выберите лот у которого есть победитель: ",
+                "show_history": ("Вы можете посмотреть историю торгов для вашего лота:\n"
+                               "Выберите название если вы добавляли лот"),
+                "show_finance": f"Для пополнения баланса обратитесь к администратору {admin_for_top_up_your_balance[0]}",
+                "deleting_lot": ("Если вы удалите лот из текущего аукциона то площадка\n"
+                               "отнимет от баланса комиссию в размере 5% от текущей\n"
+                               "стоимости лота"),
+                "/start for admin": ('в бот аукционов @lePetitecocoBot '
+                                   'Выберите необходимыe для вас действия:'),
+                "admins_settings": "Выберите необходимые действия с администраторами:",
+                "/start for user": ('Привет ,я бот аукционов @lePetitecocoBot\n'
+                                  'Я помогу вам следить за выбранными лотами ,и регулировать\n'
+                                  'ход аукциона.А так же буду следить за вашими накопленными\n'
+                                  'балами.\n'
+                                  'Удачных торгов 🤝'),
+                "my_lots": "Выберите лот в котором вы участвуете",
+                "rules": ("После окончания торгов,победитель должен выйти на связь с\n"
+                        "продавцом\n"
+                        "самостоятельно в течении суток‼️\n"
+                        "Победитель обязан выкупить лот в течении ТРЁХ дней,после\n"
+                        "окончания аукциона🔥\n"
+                        "НЕ ВЫКУП ЛОТА - ПЕРМАНЕНТНЫЙ БАН ВО ВСЕХ\n"
+                        "НУМИЗМАТИЧЕСКИХ СООБЩЕСТВАХ И АУКЦИОНАХ🤬\n"
+                        "Что бы узнать время окончания аукциона,нажмите на ⏰\n"
+                        "Анти-снайпер - Ставка сделанная за 10 минут до\n"
+                        "конца,автоматически переносит\n"
+                        "Аукцион на 10 минут вперёд ‼️\n\n"
+                        "Работают только проверенные продавцы,их Отзывы суммарно\n"
+                        "достигают 10000+ на различных площадках.\n"
+                        "Дополнительные Фото можно запросить у продавца.\n"
+                        "Случайно сделал ставку?🤔\n"
+                        "Напиши продавцу‼️\n\n\n"
+                        "Отправка почтой,стоимость пересылки указана под фото.\n"
+                        "Лоты можно копить ,экономя при этом на почте.\n"
+                        "Отправка в течении трёх дней после оплаты‼️"),
+                "help_info": (f"Свяжитесь с нами, если у вас возникли вопросы {admin_for_top_up_your_balance[0]}\n"
+                            f"При проблемах или нахождении ошибок пишите {admin_for_top_up_your_balance[0]}"),}  
+
+# Словарь который, содержит в себе ссылки на объекты Inline клавиатур telebot.types
+actions = { # Здесь только главное меню
+    "rules": MainMenu().get_menu().keyboard,
+    # Здесь только главное меню и написать в поддержку
+    "help_info": MainMenu().get_menu().keyboard,
+    
+}
 
 def update_administrator(case):
     if case == 'Обновить администраторов':
@@ -55,17 +113,68 @@ def update_administrator(case):
                                                   
                                         }})
 
-def personal_cabinet():
-    pass
+def personal_cabinet(telegram_id, type_of_message, message_id, call_id):
+    
+    #если присутствует call_id (идентификатор callback-запроса), выполняется функция 
+    # bot.answer_callback_query с передачей callback_query_id=call_id.
+    if call_id is not None:
+        bot.answer_callback_query(callback_query_id=call_id, )
 
+    if telegram_id in administrators_dict.keys():
+        if administrators_dict[telegram_id]["access_level"] == "SUPER_ADMIN":
+            starting = Start().is_super_admin_keyboard().keyboard
+        else:
+            starting = Start().is_admin_keyboard().keyboard
+        name = administrators_dict[telegram_id]['first_name']
+        telegram_link = administrators_dict[telegram_id]['telegram_link']
+        text = f"Добро пожаловать {name}, {telegram_link} " + texts_dict['/start for admin']
+
+    else:
+        starting = Start().is_user_keyboard().keyboard
+        text = texts_dict['/start for user']
+
+    # Использование нового подхода для отправки типа сообщений send или edit
+    #В зависимости от значения type_of_message выбирается соответствующая функция и аргументы для отправки
+    # сообщения или редактирования существующего сообщения.
+    send = {"send": [bot.send_message, {'chat_id': telegram_id, "text": text, "reply_markup": starting}],
+            "edit": [bot.edit_message_text, {'chat_id': telegram_id, 'message_id': message_id, "text": text,
+                                             "reply_markup": starting}]}
+    #переменные function и kwargs получают значение из словаря send в соответствии с type_of_message.
+    function, kwargs = send[type_of_message][0], send[type_of_message][1]
+    #вызываю ф-ию чтобы отправить сообщение или отредактировать существующее сообщение
+    function(**kwargs)
+
+def cabinet_actions(button_info, telegram_id, message_id, type_of_message, call_id):
+    lots, text = None, None
+
+    if call_id is not None:
+        bot.answer_callback_query(callback_query_id=call_id, )
+   
+    selected_action = actions[button_info]
+    if button_info == 'rules':
+        text = texts_dict["rules"]    
+    if button_info == 'help_info':
+        text = texts_dict["help_info"]    
+    send = {"send": [bot.send_message, {'chat_id': telegram_id, "text": text, "reply_markup": selected_action}],
+            "edit": [bot.edit_message_text, {'chat_id': telegram_id, 'message_id': message_id, "text": text,
+                                             "reply_markup": selected_action}]}
+
+    function, kwargs = send[type_of_message][0], send[type_of_message][1]
+    function(**kwargs)
+    
+    
 @bot.message_handler(content_types=['text'])
 
 def start(message):
+    print(message)
     first_name = message.from_user.first_name
     last_name = message.from_user.last_name
     telegram_id = message.from_user.id
-    telegram_link = "@" + message.from_user.username
-    menu = {'/start':'', '/help':''}
+    if message.from_user.username == None:
+        telegram_link = None
+    else:
+        telegram_link = "@" + message.from_user.username
+    menu = {'/start':personal_cabinet, '/help':''}
     
     with con:
         searching = con.execute(queries['find_user'], [telegram_id]).fetchall()
@@ -73,18 +182,29 @@ def start(message):
         if not searching:    #если пустой список
             con.execute(queries['add_user'], [first_name, last_name, telegram_id, telegram_link])
     if message.text in menu.keys():
-        pass
+        #Добавляются значения 1 и 2 в список buffer["Lots_to_add"]
+        buffer["Lots_to_add"].append(1), buffer["Lots_to_add"].append(2)
+        #Вызывается функция menu
+        menu[message.text](telegram_id, "send", None, None)
             
     
     
 @bot.callback_query_handler(func=lambda call: True)
 def query_handler(call):
-    bot.answer_callback_query(callback_query_id=call.id, )
-    id = call.message.chat.id
-    flag = call.data[0]
-    data = call.data[1:]
-    if flag == "1": 
-        pass
+    #bot.answer_callback_query(callback_query_id=call.id, )
+    chat_id = call.message.chat.id
+    message_id = call.message.message_id
+    call.data = json.loads(call.data)
+    #print(call.data)   #['/start', 'rules']
+    flag, button_info = call.data[0], call.data[1]
+    
+    callback = {'/home': (personal_cabinet, (chat_id, "edit", message_id, call.id)),
+                 '/start': (cabinet_actions, (button_info, chat_id, message_id, "edit", call.id)),
+                }
+    
+    function, args = callback[flag][0], callback[flag][1]
+
+    function(*args)
     
   
 print("Ready")
