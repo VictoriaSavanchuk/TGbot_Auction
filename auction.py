@@ -54,6 +54,7 @@ with con:
                                   'балами.\n'
                                   'Удачных торгов 🤝'),
                 "my_lots": "Выберите лот в котором вы участвуете",
+                "no_lots": "Вы еще не участвовали в лотах",
                 "rules": ("После окончания торгов,победитель должен выйти на связь с\n"
                         "продавцом\n"
                         "самостоятельно в течении суток‼️\n"
@@ -77,7 +78,12 @@ with con:
                             f"При проблемах или нахождении ошибок пишите {admin_for_top_up_your_balance[0]}"),}  
 
 # Словарь который, содержит в себе ссылки на объекты Inline клавиатур telebot.types
-actions = { # Здесь только главное меню
+actions = { 
+    # Просмотр всех Лотов в которых участвует пользователь
+    #значение для ключа "my_lots"  представляет собой лямбда-функцию, которая использует lots в качестве аргумента и возвращает 
+    # клавиатуру (предположительно объект или значение, связанное с кнопками) из метода user_participated_lots() класса BiddingHistory.
+    "my_lots": lambda lots: BiddingHistory(lots).user_participated_lots().keyboard,     
+           # Здесь только главное меню
     "rules": MainMenu().get_menu().keyboard,
     # Здесь только главное меню и написать в поддержку
     "help_info": MainMenu().get_menu().keyboard,
@@ -88,10 +94,8 @@ def update_administrator(case):
     if case == 'Обновить администраторов':
         with con:
             administrators = con.execute(queries['find_admins']).fetchall()
-            print(administrators)
-            print("\n\n")
+            #print(administrators)    #[(2, 4, 'SUPER_ADMIN', None, None, None, 4, 'Аркадзя', 'None', 451784658, '@Zenagar', None, None, None), (3, 2, 'ADMIN', None, None, None, 2, 'Светлана', 'Захарчук', 1252225243, None, None, None, None)]
         for admin in administrators:
-            print(admin)
             access_level = admin[2]
             phone = admin[3]
             email = admin[4]
@@ -149,12 +153,33 @@ def cabinet_actions(button_info, telegram_id, message_id, type_of_message, call_
 
     if call_id is not None:
         bot.answer_callback_query(callback_query_id=call_id, )
-   
+    
+    if button_info == "my_lots":  # Лоты которые, открыл пользователь в кабинете пользователя
+        lots = []
+        if buffer["Active"] is not None:
+            for lot_id in buffer['Active'].keys():
+                if "bids" in buffer["Active"][str(lot_id)].keys():   #ставка
+                    if telegram_id in buffer["Active"][str(lot_id)]['bids'].keys():
+                        with con:
+                            title = con.execute(queries["lot_title"], [int(lot_id)]).fetchall()[0][0]
+                        lots.append([lot_id, title])     
+    
     selected_action = actions[button_info]
+    # является ли selected_action вызываемым объектом, то есть функцией или методом.
+    if callable(selected_action):  # callable() - это встроенная функция в Python, которая возвращает True, если переданный объект может быть вызван, и False в противном случае.
+        selected_action = selected_action(lots)   #вызывает этот объект, передавая lots в качестве аргумента.
+        
     if button_info == 'rules':
         text = texts_dict["rules"]    
     if button_info == 'help_info':
-        text = texts_dict["help_info"]    
+        text = texts_dict["help_info"]  
+    elif button_info == "my_lots":  # текст если лотов нет, путём проверки длины клавиатуры
+        if len(selected_action.keyboard) == 1:
+            text = texts_dict["no_lots"]   #вместо отображения клавиатуры с лотами будет отправлено соответствующее текстовое сообщение
+    else:
+        text = texts_dict[button_info]
+     
+                        
     send = {"send": [bot.send_message, {'chat_id': telegram_id, "text": text, "reply_markup": selected_action}],
             "edit": [bot.edit_message_text, {'chat_id': telegram_id, 'message_id': message_id, "text": text,
                                              "reply_markup": selected_action}]}
@@ -166,7 +191,7 @@ def cabinet_actions(button_info, telegram_id, message_id, type_of_message, call_
 @bot.message_handler(content_types=['text'])
 
 def start(message):
-    print(message)
+    #print(message)
     first_name = message.from_user.first_name
     last_name = message.from_user.last_name
     telegram_id = message.from_user.id

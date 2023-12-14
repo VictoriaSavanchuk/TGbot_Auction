@@ -50,3 +50,18 @@ class MainMenu:
         main_menu = InlineKeyboardButton("Главное меню", callback_data=json.dumps(["/home", "menu"]))
         self.keyboard.add(main_menu)
         return self
+    
+class BiddingHistory:   #история торгов
+
+    def __init__(self, info):
+        self.info = info
+        self.keyboard = InlineKeyboardMarkup()
+        
+    def user_participated_lots(self):
+        for lot_info in self.info:
+            lot_id, lot_title = lot_info[0], lot_info[1]
+            title = InlineKeyboardButton(lot_title, url=f"https://t.me/lePetitecocoBot?start={lot_id}")
+            self.keyboard.add(title, row_width=1)
+        main_menu = InlineKeyboardButton("Главное меню", callback_data=json.dumps(["/home", "menu"]))
+        self.keyboard.add(main_menu)
+        return self
