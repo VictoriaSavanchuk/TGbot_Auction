@@ -50,6 +50,37 @@ class MainMenu:
         main_menu = InlineKeyboardButton("Главное меню", callback_data=json.dumps(["/home", "menu"]))
         self.keyboard.add(main_menu)
         return self
+
+class Lot:
+
+    def __init__(self):
+        self.keyboard = InlineKeyboardMarkup()
+
+    def creating_lot(self):
+        title = InlineKeyboardButton("Название", callback_data=json.dumps(['/lot', "title"]))
+        input_media = InlineKeyboardButton("Добавить изображения", callback_data=json.dumps(['/lot', "media"]))
+        initial_price = InlineKeyboardButton("Стартовая цена",
+                                             callback_data=json.dumps(['/lot', "price"]))
+        geolocation = InlineKeyboardButton("Геолокация товара",
+                                           callback_data=json.dumps(['/lot', "geolocation"]))
+        description = InlineKeyboardButton("Описание", callback_data=json.dumps(['/lot', "description"]))
+        additional_info = InlineKeyboardButton("Доп.информация",
+                                               callback_data=json.dumps(['/lot', "additional_info"]))
+        save_lot = InlineKeyboardButton("Сохранить Лот",
+                                        callback_data=json.dumps(['/lot', "save_lot"]))
+        main_menu = InlineKeyboardButton("Главное меню", callback_data=json.dumps(["/home", "menu"]))
+        self.keyboard.add(title, input_media, initial_price, geolocation,
+                          description, additional_info, save_lot, main_menu, row_width=1)
+        return self
+    
+    def quantity_of_images(self):
+        one_image = InlineKeyboardButton("1 изображение", callback_data=json.dumps(['/lot', "media_1"]))
+        two_image = InlineKeyboardButton("2 изображения", callback_data=json.dumps(['/lot', "media_2"]))
+        three_image = InlineKeyboardButton("3 изображения", callback_data=json.dumps(['/lot', "media_3"]))
+        four_image = InlineKeyboardButton("4 изображения", callback_data=json.dumps(['/lot', "media_4"]))
+        backward = InlineKeyboardButton("Назад", callback_data=json.dumps(['/start', "create_lot"]))
+        self.keyboard.add(one_image, two_image, three_image, four_image, backward, row_width=1)
+        return self
     
 class BiddingHistory:   #история торгов
 
