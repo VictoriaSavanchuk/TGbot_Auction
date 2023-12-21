@@ -82,11 +82,39 @@ class Lot:
         self.keyboard.add(one_image, two_image, three_image, four_image, backward, row_width=1)
         return self
     
+    def saving_confirmation(self):
+        yes = InlineKeyboardButton("Подтверждаю", callback_data=json.dumps(['/save', "confirm"]))
+        no = InlineKeyboardButton("Отменить", callback_data=json.dumps(['/start', "create_lot"]))
+        self.keyboard.add(no, yes, row_width=2)
+        return self
+
+    def recreate_lot(self):
+        selled_lots = InlineKeyboardButton("Проданные лоты", callback_data=json.dumps(['/start', "selled_lots"]))
+        unselled_lots = InlineKeyboardButton("Не проданные лоты", callback_data=json.dumps(['/start', "unselled_lots"]))
+        main_menu = InlineKeyboardButton("Главное меню", callback_data=json.dumps(["/home", "menu"]))
+        self.keyboard.add(selled_lots, unselled_lots, main_menu, row_width=1)
+        return self
+    
+    def saving_confirmation(self):
+        yes = InlineKeyboardButton("Подтверждаю", callback_data=json.dumps(['/save', "confirm"]))
+        no = InlineKeyboardButton("Отменить", callback_data=json.dumps(['/start', "create_lot"]))
+        self.keyboard.add(no, yes, row_width=2)
+        return self
+    
 class BiddingHistory:   #история торгов
 
     def __init__(self, info):
         self.info = info
         self.keyboard = InlineKeyboardMarkup()
+        
+    def show(self):
+        for lot_info in self.info:
+            lot_id, lot_title = lot_info[0], lot_info[1]
+            title = InlineKeyboardButton(lot_title, callback_data=json.dumps(['/history', lot_id]))
+            self.keyboard.add(title, row_width=1)
+        main_menu = InlineKeyboardButton("Главное меню", callback_data=json.dumps(["/home", "menu"]))
+        self.keyboard.add(main_menu)
+        return self
         
     def user_participated_lots(self):
         for lot_info in self.info:
@@ -95,4 +123,49 @@ class BiddingHistory:   #история торгов
             self.keyboard.add(title, row_width=1)
         main_menu = InlineKeyboardButton("Главное меню", callback_data=json.dumps(["/home", "menu"]))
         self.keyboard.add(main_menu)
+        return self
+    
+    def recreate_lot(self):
+       
+        for lot_info in self.info:
+            lot_id, lot_title = lot_info[0], lot_info[1]
+            title = InlineKeyboardButton(lot_title, callback_data=json.dumps(['/recreate', lot_id]))
+            self.keyboard.add(title)
+        back = InlineKeyboardButton("Назад", callback_data=json.dumps(['/start', "recreate_lot"]))
+        self.keyboard.add(back)
+        return self
+    
+    def won_lot(self):
+        for lot_info in self.info:
+            lot_id, lot_title = lot_info[0], lot_info[1]
+            title = InlineKeyboardButton(lot_title, callback_data=json.dumps(['/customer', lot_id]))
+            self.keyboard.add(title)
+        home = InlineKeyboardButton("Главное меню", callback_data=json.dumps(["/home", "menu"]))
+        self.keyboard.add(home)
+        return self
+    
+    def winner(self):
+        user_id = self.info
+        payed = InlineKeyboardButton("Оплатил", callback_data=json.dumps(['/winner', user_id]))
+        strike = InlineKeyboardButton("Страйк за неоплату", callback_data=json.dumps(['/winner', user_id]))  #/winner -доработать в callback
+        back = InlineKeyboardButton("Назад", callback_data=json.dumps(["/start", "customers"]))
+        self.keyboard.add(payed, strike, back, row_width=1)
+        return self
+    
+    def delete_bid(self):
+        back = InlineKeyboardButton("Назад", callback_data=json.dumps(['/start', "show_history"]))
+        if self.info == "ACTIVE_LOT":
+            delete = InlineKeyboardButton("Удалить ставку", callback_data=json.dumps(['/bids', "delete"]))  #/bids -доработать в callback
+            self.keyboard.add(delete, back, row_width=1)
+        else:
+            self.keyboard.add(back)
+        return self
+    
+    def delete_lot(self):
+        for lot_info in self.info:
+            lot_id, lot_title = lot_info[0], lot_info[1]
+            title = InlineKeyboardButton(lot_title, callback_data=json.dumps(['/delete', lot_id]))
+            self.keyboard.add(title)
+        home = InlineKeyboardButton("Главное меню", callback_data=json.dumps(["/home", "menu"]))
+        self.keyboard.add(home)
         return self

@@ -110,6 +110,16 @@ with con:
                   "description": "Описание",
                   "additional_info": "Доп.Информация"
                   },
+                "save_lot": "Подтвердите сохранение",
+                "selled_lots": "Выберите из проданных лотов:",
+
+                "unselled_lots": "Выберите из не-проданных лотов:",
+                "customers": "Выберите лот у которого есть победитель: ",
+
+                "no_customers": "Пока по вашим лотам победителей нет",
+
+                "show_history": ("Вы можете посмотреть историю торгов для вашего лота:\n"
+                               "Выберите название если вы добавляли лот"),
                 }  
 
 # Словарь который, содержит в себе ссылки на объекты Inline клавиатур telebot.types
@@ -125,7 +135,7 @@ actions = {
      # Текст по обращению к супер админу для пополнения баланса и действия с лотами
     "my_balance": "",
     "create_lot": Lot().creating_lot().keyboard,
-    #"recreate_lot": Lot().recreate_lot().keyboard,
+    "recreate_lot": Lot().recreate_lot().keyboard,
     "title": None,
     "media": Lot().quantity_of_images().keyboard,
     "media_1": None,
@@ -136,8 +146,12 @@ actions = {
     "geolocation": None,
     "description": None,
     "additional_info": None,
-    #"save_lot": Lot().saving_confirmation().keyboard,
-    
+    "save_lot": Lot().saving_confirmation().keyboard,
+    "selled_lots": lambda lots: BiddingHistory(lots).recreate_lot().keyboard,
+    "unselled_lots": lambda lots: BiddingHistory(lots).recreate_lot().keyboard,
+    "customers": lambda lots: BiddingHistory(lots).won_lot().keyboard,
+    "show_history": lambda lots: BiddingHistory(lots).show().keyboard,
+    "deleting_lot": lambda lots: BiddingHistory(lots).delete_lot().keyboard,
 }
 
 def update_administrator(case):
@@ -204,6 +218,15 @@ def cabinet_actions(button_info, telegram_id, message_id, type_of_message, call_
     if call_id is not None:
         bot.answer_callback_query(callback_query_id=call_id, )
     
+    lot_info_queries = {"customers": "lot_id_title-winners",
+                        "show_history": "lot_id_title",
+                        "selled_lots": "get_selled_lots",
+                        "unselled_lots": "get_unselled_lots"}
+    if button_info in lot_info_queries.keys():
+        with con:
+            lots = con.execute(queries[lot_info_queries[button_info]], [telegram_id]).fetchall()
+
+    
     if button_info == "my_lots":  # Лоты которые, открыл пользователь в кабинете пользователя
         lots = []
         if buffer["Active"] is not None:
@@ -212,7 +235,17 @@ def cabinet_actions(button_info, telegram_id, message_id, type_of_message, call_
                     if telegram_id in buffer["Active"][str(lot_id)]['bids'].keys():
                         with con:
                             title = con.execute(queries["lot_title"], [int(lot_id)]).fetchall()[0][0]
-                        lots.append([lot_id, title])     
+                        lots.append([lot_id, title])  
+            
+    elif button_info == "deleting_lot":  # Лоты которые админ хочет удалить
+        lots = []
+        if buffer["Active"] is not None:
+            for lot_id in buffer['Active'].keys():
+                with con:
+                    users_telegram_id = con.execute(queries["lot_is_users?"], [int(lot_id)]).fetchall()[0][0]
+                    if users_telegram_id == telegram_id:
+                        title = con.execute(queries["lot_title"], [int(lot_id)]).fetchall()[0][0]
+                        lots.append([lot_id, title])   
     
     selected_action = actions[button_info]
     # является ли selected_action вызываемым объектом, то есть функцией или методом.
@@ -286,12 +319,179 @@ def creating_lot(button_info, telegram_id, message_id, message, call_id):
 # обработчика get_info. Получаю доп инф от пользователя для создания лота.
     if button_info in handler_register:
         bot.register_next_step_handler(message, get_info, button_info)
+        
+def recreate_lot(telegram_id, lot_id, message_id, call_id):
+    if lot_id not in buffer["Lots_to_add"]:
+
+        bot.answer_callback_query(callback_query_id=call_id, text="Лот добавлен на проверку")
+        info = "Лот добавлен на проверку модераторам"
+
+    else:
+
+        bot.answer_callback_query(callback_query_id=call_id, text="Лот уже в очереди")
+        info = "Лот находится на проверке"
+
+    main_menu = MainMenu().get_menu().keyboard
+    bot.edit_message_text(chat_id=telegram_id, message_id=message_id, text=info, reply_markup=main_menu)
+    
+    
+   #сохраняет лот в базе данных и перемещает изображения лота из временной папки в папку, соответствующую идентификатору лота 
+def save_lot(telegram_id, message_id, call_id):
+    #Извлекаются данные о лоте 
+    title = administrators_dict[telegram_id]["new_lot"]["title"]
+    price = administrators_dict[telegram_id]["new_lot"]["price"]
+    geolocation = administrators_dict[telegram_id]["new_lot"]["geolocation"]
+    description = administrators_dict[telegram_id]["new_lot"]["description"]
+    add_info = administrators_dict[telegram_id]["new_lot"]["additional_info"]
+
+    if title is None or price is None or geolocation is None or description is None:
+        bot.answer_callback_query(callback_query_id=call_id, text="Заполните все данные")
+    else:
+        #извлекается идентификатор пользователя (users_id) и идентификатор администратора (admin_id)
+        with con:
+            users_id = con.execute(queries["searching_user"], [telegram_id]).fetchall()[0][0]
+            admin_id = con.execute(queries["admin_id"], [users_id]).fetchall()[0][0]
+            #Вставляются данные лота в базу данных 
+            con.execute(queries["save_lot"], [admin_id, title, geolocation, price, description, add_info])
+            #Получается идентификатор сохраненного лота (lot_id) из базы данных
+            lot_id = con.execute(queries["lot_id"], [admin_id]).fetchall()[-1][0]
+        
+        source_directory = f"Media/{str(telegram_id)}"
+
+        directory = "Lots/"
+        folder_name = str(lot_id)
+        folder_path = os.path.join(directory, folder_name)
+        if not os.path.exists(folder_path):
+            os.makedirs(folder_path)
+        #Создается папка для лота с именем, равным lot_id, если она не существует.
+        target_directory = f"Lots/{str(lot_id)}"
+        file_list = os.listdir(source_directory)
+        #Изображения лота перемещаются из временной папки (Media/{telegram_id}) в папку лота (Lots/{lot_id}) с использованием библиотеки shutil
+        for file_name in file_list:
+            source_path = os.path.join(source_directory, file_name)
+            target_path = os.path.join(target_directory, file_name)
+            shutil.move(source_path, target_path)
+        #Если временная папка (Media/{telegram_id}) существует, она удаляется с помощью shutil.rmtree.
+        if os.path.exists(source_directory):
+            shutil.rmtree(source_directory)
+        #ссылки на изображения лота, проходя по файлам в папке лота и добавляя их в список image_links.
+        image_links = []
+
+        for filename in os.listdir(target_directory):
+            if filename.endswith('.jpg') or filename.endswith('.png'):
+                image_link = f"{target_directory}/{filename}"
+                image_links.append(image_link)
+        #Загружаются ссылки на изображения лота в базу данных
+        with con:
+            for link in image_links:
+                con.execute(queries["lot_upload_links"], [lot_id, link])
+        #Удаляется информация о новом лоте из словаря administrators_dict
+        del administrators_dict[telegram_id]["new_lot"]
+
+        bot.answer_callback_query(callback_query_id=call_id, text="Лот успешно сохранён")
+
+        buffer["Lots_to_add"].append(lot_id)
+
+        personal_cabinet(telegram_id, "edit", message_id, None)
 
 def get_info(message, button_info):
     telegram_id = message.from_user.id
     message_id = message.chat.id
     administrators_dict[telegram_id]["new_lot"][button_info] = message.text
     cabinet_actions("create_lot", telegram_id, message_id, "send", None)
+    
+# Информация о победителе лота
+def winner_info(telegram_id, message_id, lot_id, call_id):
+    bot.answer_callback_query(callback_query_id=call_id, )
+
+    with con:
+        winners_link = con.execute(queries["get_winners_link"], [lot_id]).fetchall()[0][0]
+        user_id = con.execute(queries["get_winners_id"], [lot_id]).fetchall()[0][0]
+        lot_title = con.execute(queries["lot_title"], [lot_id]).fetchall()[0][0]
+
+    text = f"Победителем лота: \n {lot_title} \n является: {winners_link}"
+
+    keyboard = BiddingHistory(user_id).winner().keyboard
+
+    bot.edit_message_text(chat_id=telegram_id, message_id=message_id, text=text, reply_markup=keyboard)
+    
+# Функция для просмотра истории
+def show_history(telegram_id, message_id, lot_id, call_id):
+    bot.answer_callback_query(callback_query_id=call_id, )
+
+    if str(lot_id) in buffer["Active"].keys():
+        keyboard = BiddingHistory("ACTIVE_LOT").delete_bid().keyboard
+    else:
+        keyboard = BiddingHistory(None).delete_bid().keyboard
+
+    with con:
+        bids_info = con.execute(queries["get_bids_by_lot"], [lot_id]).fetchall()
+
+    if bids_info:
+        text = "История ставок от пользователей по вашему лоту:\n"
+        for info in bids_info:
+            users_link, bid_amount, bid_date = info[0], info[1], info[2]
+            text += f"{users_link}: {bid_amount} - {bid_date}\n"
+    else:
+        text = "Ставок по вашему лоту пока нет"
+
+    bot.edit_message_text(chat_id=telegram_id, message_id=message_id, text=text, reply_markup=keyboard)
+    
+# Функция lot_information для получения всего текста по лоту
+def lot_information(lot_id):
+    with con:
+        lot_info = con.execute(queries["get_lot_info"], [lot_id]).fetchall()[0]
+        lot_title, lot_price, lot_geolocation = lot_info[0], str(lot_info[1]), lot_info[2]
+        lot_description, lot_additional_info, sellers_link = lot_info[3], lot_info[4], lot_info[5]
+
+    if lot_additional_info is not None:
+        text = (lot_title + "\n" +
+                lot_geolocation + "\n" +
+                lot_description + "\n" +
+                lot_additional_info + "\n" +
+                ("Продавец " + sellers_link) + "\n\n")
+    else:
+        text = (lot_title + "\n" +
+                lot_price + "\n" +
+                lot_geolocation + "\n" +
+                lot_description + "\n" +
+                ("Продавец " + sellers_link) + "\n\n")
+    return text
+    
+def delete_lot(telegram_id, message_id, lot_id, call_id):
+    message = "🚫Вы удалили лот"
+    bot.answer_callback_query(callback_query_id=call_id, text=message)
+
+    lot_message = buffer["Active"][str(lot_id)]["message"]
+    text = lot_information(lot_id)
+
+    if 'bids' in buffer["Active"][str(lot_id)].keys():
+        lot_price = max(buffer["Active"][str(lot_id)]["bids"].values())
+        text += "Следующая ставка: " + str(lot_price + 100) + "₽"
+
+    else:
+        with con:
+            lot_price = con.execute(queries['lot_price'], [lot_id]).fetchall()[0][0]
+        text += "Следующая ставка: " + str(lot_price) + "₽"
+
+    with con:
+        balance = con.execute(queries['get_balance'], [telegram_id]).fetchall()[0][0]
+        commission = lot_price / 100 * 5
+        new_balance = balance - commission
+        con.execute(queries['set_balance'], [new_balance, telegram_id])
+
+    text += "\n\n👮‍♀️Лот был удалён администратором"
+
+    bot.edit_message_reply_markup(chat_id=chanel, message_id=lot_message, reply_markup=None)
+    bot.edit_message_caption(caption=text, chat_id=chanel, message_id=lot_message)
+
+    if "user_opened" in buffer["Active"][str(lot_id)].keys():
+        for user_id, message_id in buffer["Active"][str(lot_id)]["user_opened"].items():
+            bot.edit_message_reply_markup(chat_id=user_id, message_id=message_id, reply_markup=None)
+            bot.edit_message_caption(caption=text, chat_id=user_id, message_id=message_id)
+
+    personal_cabinet(telegram_id, 'edit', message_id, None)
+
     
 @bot.message_handler(content_types=['photo'])
 def handle_image(message):
@@ -373,6 +573,11 @@ def query_handler(call):
     callback = {'/home': (personal_cabinet, (chat_id, "edit", message_id, call.id)),
                 '/start': (cabinet_actions, (button_info, chat_id, message_id, "edit", call.id)),
                 '/lot': (creating_lot, (button_info, chat_id, message_id, call.message, call.id)),
+                '/recreate': (recreate_lot, (chat_id, button_info, message_id, call.id)),
+                '/save': (save_lot, (chat_id, message_id, call.id)),
+                '/customer': (winner_info, (chat_id, message_id, button_info, call.id)),
+                '/history': (show_history, (chat_id, message_id, button_info, call.id)),
+                '/delete': (delete_lot, (chat_id, message_id, button_info, call.id)),
                 }
     
     function, args = callback[flag][0], callback[flag][1]
