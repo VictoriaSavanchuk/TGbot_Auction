@@ -95,11 +95,6 @@ class Lot:
         self.keyboard.add(selled_lots, unselled_lots, main_menu, row_width=1)
         return self
     
-    def saving_confirmation(self):
-        yes = InlineKeyboardButton("Подтверждаю", callback_data=json.dumps(['/save', "confirm"]))
-        no = InlineKeyboardButton("Отменить", callback_data=json.dumps(['/start', "create_lot"]))
-        self.keyboard.add(no, yes, row_width=2)
-        return self
     
 class BiddingHistory:   #история торгов
 
@@ -126,7 +121,6 @@ class BiddingHistory:   #история торгов
         return self
     
     def recreate_lot(self):
-       
         for lot_info in self.info:
             lot_id, lot_title = lot_info[0], lot_info[1]
             title = InlineKeyboardButton(lot_title, callback_data=json.dumps(['/recreate', lot_id]))
@@ -168,4 +162,43 @@ class BiddingHistory:   #история торгов
             self.keyboard.add(title)
         home = InlineKeyboardButton("Главное меню", callback_data=json.dumps(["/home", "menu"]))
         self.keyboard.add(home)
+        return self
+    
+
+class Card:
+
+    def __init__(self, lot_id):
+        self.keyboard = InlineKeyboardMarkup()
+        self.lot_id = lot_id
+
+    def chanel_card(self):
+        timer = InlineKeyboardButton("🕒", callback_data=json.dumps(['/card', "timer"]))
+        info = InlineKeyboardButton("ℹ️", callback_data=json.dumps(['/card', "card_info"]))
+        link = InlineKeyboardButton("Открыть лот", url=f"https://t.me/lePetitecocoBot?start={self.lot_id}")
+        self.keyboard.row(timer, info)
+        self.keyboard.add(link)
+        return self
+
+    def bot_card(self):
+        timer = InlineKeyboardButton("🕒", callback_data=json.dumps(['/card', "timer"]))
+        info = InlineKeyboardButton("ℹ️", callback_data=json.dumps(['/card', "card_info"]))
+        make_bid = InlineKeyboardButton("Сделать ставку", callback_data=json.dumps(['/card_bids', self.lot_id]))
+        hidden_bid_settings = InlineKeyboardButton("Настроить скрытую ставку",
+                                                   callback_data=json.dumps(['/card', "hidden_bid_settings"]))
+        photo_video = InlineKeyboardButton("Смотреть фото/видео",
+                                           callback_data=json.dumps(['/card_media', self.lot_id]))
+        self.keyboard.row(timer, info)
+        self.keyboard.add(make_bid, hidden_bid_settings, photo_video, row_width=1)
+        return self
+
+class Support:  #поддержка
+
+    def __init__(self, lot_id):
+        self.keyboard = InlineKeyboardMarkup()
+        self.lot_id = lot_id
+
+    def approvement(self):
+        accept = InlineKeyboardButton("Одобрить", callback_data=json.dumps(['/accept', self.lot_id]))
+        decline = InlineKeyboardButton("Отклонить", callback_data=json.dumps(['/decline', self.lot_id]))
+        self.keyboard.add(decline, accept, row_width=2)
         return self

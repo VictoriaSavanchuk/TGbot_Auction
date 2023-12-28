@@ -1,14 +1,16 @@
 import time
+import datetime 
+from datetime import timedelta
 import telebot
 from telebot import types
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from telebot.types import InputMediaPhoto
-import gspread
 import json
 import sqlite3 as sl
 from keyboards import * 
 import os
 import shutil
+import schedule
 import threading
 
 
@@ -26,6 +28,11 @@ bot = telebot.TeleBot(Token)
 con = sl.connect(database, check_same_thread=False)     #check_same_thread=False  обращение в разных потоках
 message_lock = threading.Lock()
 
+#для настройки карточек лота
+remaining_time = None
+timer_thread = None
+
+
 # создаю словарь для обновления админ
 administrators_dict = {}
 # текущие лоты, кот учавствуют в аукционе
@@ -39,6 +46,7 @@ buffer = {
 #регистрация обработчика для получения текста, через название кнопки
 handler_register =["title", "price", "geolocation", "description", "additional_info"]       
 
+# словарь, в котором хрранится текст, используемый в боте
 with con:
     admin_for_top_up_your_balance = con.execute(queries['find_admin_for_top_up_your_balance']).fetchone()
     #print(admin_for_top_up_your_balance)  #('@Zenagar',)
@@ -65,6 +73,7 @@ with con:
 
                 "recreate_lot": "Выберите лоты из которых необходимо пересоздать лот",
                 "customers": "Выберите лот у которого есть победитель: ",
+                "no_customers": "Пока по вашим лотам победителей нет",
                 "show_history": ("Вы можете посмотреть историю торгов для вашего лота:\n"
                                "Выберите название если вы добавляли лот"),
                 "show_finance": f"Для пополнения баланса обратитесь к администратору {admin_for_top_up_your_balance[0]}",
@@ -120,15 +129,54 @@ with con:
 
                 "show_history": ("Вы можете посмотреть историю торгов для вашего лота:\n"
                                "Выберите название если вы добавляли лот"),
+                "card_info": ("После окончания торгов,победитель\n"
+                            "должен выйти на связь с продавцом\n"
+                            "самостоятельно в течении\n"
+                            "суток. Победитель обязан выкупить лот\n"
+                            "в течении ТРЁХ дней,после окончания\n"
+                            "аукциона.\n"
+                            "НЕ ВЫКУП ЛОТА - БАН."),
+                "start_auction": ("Короткий аукцион 🔥🤳\n"
+                                "Окончание: "
+                                f"{(datetime.datetime.now().date() + timedelta(days=1)).strftime('%d.%m.%Y')}💥\n"
+                                "С 23:00-00:00\n"
+                                "По МСК\n\n"
+                                "Работают только проверенные продавцы,их Отзывы сумарно\n"
+                                "достигают 10000+ на различных площадках.\n"
+                                "Дополнительные Фото можно запросить у продавца.\n"
+                                "Случайно сделал ставку?🤔\n"
+                                "Напиши продавцу‼️\n\n\n"
+                                "Отправка почтой только по РОССИИ,стоимость пересылки\n"
+                                "указана под фото.\n"
+                                "Лоты можно копить ,экономя при этом на почте.\n"
+                                "Отправка в течении трёх дней после оплаты‼️\n\n"
+                                "После окончания торгов,победитель должен выйти на связь\n"
+                                "с продавцом\n"
+                                "самостоятельно в течении суток‼️\n"
+                                "Победитель обязан выкупить лот в течении ТРЁХ дней,после\n"
+                                "окончания аукциона🔥\n"
+                                "НЕ ВЫКУП ЛОТА - ПЕРМАНЕНТНЫЙ БАН ВО ВСЕХ\n"
+                                "НУМИЗМАТИЧЕСКИХ СООБЩЕСТВАХ И АУКЦИОНАХ🤬\n"
+                                "Что бы узнать время окончания аукциона,нажмите на ⏰\n\n"
+                                "Для участия нажмите УЧАСТВОВАТЬ,\n"
+                                "Далее вас перенёс в чат с ботом,\n"
+                                "Нажмите СТАРТ и вам будет доступен калькулятор ставок.\n"
+                                "Повторяйте эту процедуру при добавлении новых лотов.\n\n\n"
+                                "Антиснайпер - Ставка сделанная за 10 минут до\n"
+                                "конца,автоматически переносит\n"
+                                "Аукцион на 10 минут вперёд ‼️"),
+                "notification_of_victory": ("💥Поздравляем с победой💥, напоминаем вам\n"
+                                          "что вы должны выйти на связь с продавцом\n"
+                                          "в течении суток, и вы обязаны выкупить лот\n"
+                                          "в течении трёх дней, после получения этого\n"
+                                          "сообщения, за нарушение этого правила:\n"
+                                          "вы больше не сможете участвовать\n"
+                                          "и пользоваться услугами площадки"),
                 }  
 
 # Словарь который, содержит в себе ссылки на объекты Inline клавиатур telebot.types
 actions = { 
-    # Просмотр всех Лотов в которых участвует пользователь
-    #значение для ключа "my_lots"  представляет собой лямбда-функцию, которая использует lots в качестве аргумента и возвращает 
-    # клавиатуру (предположительно объект или значение, связанное с кнопками) из метода user_participated_lots() класса BiddingHistory.
-    "my_lots": lambda lots: BiddingHistory(lots).user_participated_lots().keyboard,     
-           # Здесь только главное меню
+    # Здесь только главное меню
     "rules": MainMenu().get_menu().keyboard,
     # Здесь только главное меню и написать в поддержку
     "help_info": MainMenu().get_menu().keyboard,
@@ -147,6 +195,11 @@ actions = {
     "description": None,
     "additional_info": None,
     "save_lot": Lot().saving_confirmation().keyboard,
+    "show_finance": MainMenu().get_menu().keyboard,
+    # Просмотр всех Лотов в которых участвует пользователь
+    #значение для ключа "my_lots"  представляет собой лямбда-функцию, которая использует lots в качестве аргумента и возвращает 
+    # клавиатуру (предположительно объект или значение, связанное с кнопками) из метода user_participated_lots() класса BiddingHistory.
+    "my_lots": lambda lots: BiddingHistory(lots).user_participated_lots().keyboard,   
     "selled_lots": lambda lots: BiddingHistory(lots).recreate_lot().keyboard,
     "unselled_lots": lambda lots: BiddingHistory(lots).recreate_lot().keyboard,
     "customers": lambda lots: BiddingHistory(lots).won_lot().keyboard,
@@ -217,7 +270,7 @@ def cabinet_actions(button_info, telegram_id, message_id, type_of_message, call_
 
     if call_id is not None:
         bot.answer_callback_query(callback_query_id=call_id, )
-    
+    #покупатели, история торгов, проданные лоты, не проданные лоты
     lot_info_queries = {"customers": "lot_id_title-winners",
                         "show_history": "lot_id_title",
                         "selled_lots": "get_selled_lots",
@@ -290,7 +343,15 @@ def cabinet_actions(button_info, telegram_id, message_id, type_of_message, call_
                 else:
                     value = "Нет"
             text += f"{texts_dict['names'][key]}: {value}\n" 
-            print(text)
+            #print(text)
+            
+    elif button_info == "show_finance":
+        with con:
+            balance = con.execute(queries['get_balance'], [telegram_id]).fetchall()[0][0]
+        if balance == None:
+            text += f"\nВаш текущий баланс равен 0"
+        else:
+            text += f"\nВаш текущий баланс: {balance}"
                         
     send = {"send": [bot.send_message, {'chat_id': telegram_id, "text": text, "reply_markup": selected_action}],
             "edit": [bot.edit_message_text, {'chat_id': telegram_id, 'message_id': message_id, "text": text,
@@ -319,7 +380,8 @@ def creating_lot(button_info, telegram_id, message_id, message, call_id):
 # обработчика get_info. Получаю доп инф от пользователя для создания лота.
     if button_info in handler_register:
         bot.register_next_step_handler(message, get_info, button_info)
-        
+ 
+#повторное создание лота      
 def recreate_lot(telegram_id, lot_id, message_id, call_id):
     if lot_id not in buffer["Lots_to_add"]:
 
@@ -458,6 +520,7 @@ def lot_information(lot_id):
                 ("Продавец " + sellers_link) + "\n\n")
     return text
     
+    #удаление лота из текущего аукциона
 def delete_lot(telegram_id, message_id, lot_id, call_id):
     message = "🚫Вы удалили лот"
     bot.answer_callback_query(callback_query_id=call_id, text=message)
@@ -491,6 +554,285 @@ def delete_lot(telegram_id, message_id, lot_id, call_id):
             bot.edit_message_caption(caption=text, chat_id=user_id, message_id=message_id)
 
     personal_cabinet(telegram_id, 'edit', message_id, None)
+
+#НАСТРОЙКА КАРТОЧКИ ЛОТА
+# Спец функция для обработки двух кнопок которые, не отправляют текст, а содержат информацию, принимает два аргумента: call_id и button_info.
+def card_info(call_id, button_info):
+    if button_info == "timer":
+        #Объявляется переменная remaining_time как глобальная
+        global remaining_time
+
+        if remaining_time is not None:
+            #производится расчет оставшегося времени в днях, часах, минутах и секундах
+            days = remaining_time.days
+            hours, remainder = divmod(remaining_time.seconds, 3600)
+            minutes, seconds = divmod(remainder, 60)
+            #сообщение об оставшемся времени продолжения аукциона данного лота
+            message = f"Осталось {days} дней {hours} часов {minutes} минут {seconds} секунд"
+            bot.answer_callback_query(callback_query_id=call_id, text=message)
+
+    elif button_info == "card_info":
+        message = texts_dict[button_info]
+        #С помощью метода bot.answer_callback_query отправляется ответ на вызов call_id с текстом сообщения, и 
+        # параметр show_alert установлен в значение True, чтобы показать предупреждение.
+        bot.answer_callback_query(callback_query_id=call_id, text=message, show_alert=True)
+    
+# Обработка нажатие кнопки отправить фото/видео, в которой, создаётся медиа группа
+def card_media(telegram_id, message_id, lot_id, call_id):
+    message = "✅Отправили вам фото и видео"
+    bot.answer_callback_query(callback_query_id=call_id, text=message)
+
+    with con:
+        image_links = con.execute(queries["get_images_link"], [lot_id]).fetchall()[0]   #возвращает ссылки на изображения для указанного lot_id
+        lot_price = con.execute(queries["lot_price"], [lot_id]).fetchall()[0][0]        #возвращает цену для указанного lot_id
+
+    text = lot_information(lot_id)
+
+    if "bids" in buffer["Active"][str(lot_id)].keys():      #Если в buffer["Active"][str(lot_id)] присутствует ключ "bids", то находится
+        #максимальное значение ставки (last_bid) из словаря buffer["Active"][str(lot_id)]["bids"] + строка "Следующая ставка: " 
+        # и значение last_bid в рублях
+        last_bid = max(buffer["Active"][str(lot_id)]["bids"].values())
+        text += "Следующая ставка: " + str(last_bid) + "₽"
+    else:
+        text += "Следующая ставка: " + str(lot_price) + "₽"
+
+    media_group = []
+    #итерация по ссылкам на изображения в image_links
+    for link in image_links:
+        #Если текущая ссылка является первой ссылкой (link is image_links[0]), то создается медиа-объект InputMediaPhoto с открытым 
+        # файлом изображения (open(link, 'rb')) и текстом caption, равным text. Этот медиа-объект добавляется в список media_group
+        if link is image_links[0]:
+            media_group.append(telebot.types.InputMediaPhoto(open(link, 'rb'), caption=text))
+        else:  #иначе создается медиа-объект InputMediaPhoto с открытым файлом изображения (open(link, 'rb')) и также добавляется в список media_group
+            media_group.append(telebot.types.InputMediaPhoto(open(link, 'rb')))
+    #для отправки группы медиа-объектов, связана с исходным сообщением, идентифицируемым по message_id.
+    bot.send_media_group(chat_id=telegram_id, media=media_group, reply_to_message_id=message_id)
+
+# Функция для ставок : обновить информацию о ставках и лидерах в сообщениях канала и пользователям после принятия новой ставки
+# и отобразить информацию о следующей ставке
+def card_bids(telegram_id, lot_id, call_id):
+    message = "Ставка принята"
+    bot.answer_callback_query(callback_query_id=call_id, text=message)
+
+    with con:
+        lot_price = con.execute(queries['lot_price'], [lot_id]).fetchall()[0][0]    #цена для указанного lot_id
+        users_link = con.execute(queries['users_link'], [telegram_id]).fetchall()[0][0]   #ссылк на пользователя с указанным telegram_id
+    #Если ключ отсутствует, то в словарь buffer["Active"][lot_id] добавляется ключ "bids" со значением {telegram_id: lot_price}
+    if "bids" not in buffer["Active"][str(lot_id)].keys():
+        buffer["Active"][lot_id].update({"bids": {telegram_id: lot_price}})
+    else:  
+        #находится максимальное значение ставки (last_bid) из словаря buffer["Active"][str(lot_id)]["bids"], и в словарь добавляется ставка пользователя 
+        #с увеличением на 100 от last_bid.
+        last_bid = max(buffer["Active"][str(lot_id)]["bids"].values())
+        buffer["Active"][str(lot_id)]["bids"].update({telegram_id: last_bid + 100})
+
+    last_bid = max(buffer["Active"][str(lot_id)]["bids"].values())    #максимальное значение ставки
+    #Создается новая ставка (new_bid), равная last_bid + 100  и Записывается текущая дата и время 
+    new_bid = last_bid + 100
+    current_datetime = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    with con:
+        user_id = con.execute(queries["user_id"], [telegram_id]).fetchall()[0][0]
+         #вставляем запись о ставке в бд с параметрами: lot_id, user_id, last_bid и current_datetime.
+        con.execute(queries["insert_bid_to_lot"], [lot_id, user_id, last_bid, current_datetime]) 
+
+    second_place, third_place = None, None
+    #Проверяется количество элементов в словаре buffer["Active"]
+    if len(buffer["Active"][str(lot_id)]["bids"].items()) == 2:  # Если количество равно 2, то находится второе место (значение и ключ со вторым максимальным значением ставки) и ссылка на пользователя для этого места.
+        sorted_items = sorted(buffer["Active"][str(lot_id)]["bids"].items(), key=lambda x: x[1], reverse=True)[1]
+        with con:
+            second_place_users_link = con.execute(queries["users_link"], [sorted_items[0]]).fetchall()[0][0]
+
+        second_place = f"\n🥈 {sorted_items[1]}₽ {second_place_users_link[1:3]}***"
+        third_place = None
+     # Если количество больше 2, то находятся и второе и третье места (значения и ключи со вторым и третьим максимальными значениями ставок) и ссылки на пользователей для этих мест.
+    elif len(buffer["Active"][str(lot_id)]["bids"].items()) > 2: 
+        sorted_items = sorted(buffer["Active"][str(lot_id)]["bids"].items(), key=lambda x: x[1], reverse=True)[1:3]
+        with con:
+            second_place_users_link = con.execute(queries["users_link"], [sorted_items[0][0]]).fetchall()[0][0]
+            third_place_users_link = con.execute(queries["users_link"], [sorted_items[1][0]]).fetchall()[0][0]    
+
+        second_place = f"\n🥈 {sorted_items[0][1]}₽ {second_place_users_link[1:3]}***"
+        third_place = f"\n🥉 {sorted_items[1][1]}₽ {third_place_users_link[1:3]}***"
+
+    text = lot_information(lot_id)
+    text += "Следующая ставка: " + str(new_bid) + "₽"
+
+    # ("Ваша скрытая ставка: " + "0" + "₽"))
+
+    liders = f"\n\n🥇 {last_bid}₽ {users_link[1:3]}***"  #информацию о лидере (последняя ставка) с использованием ссылки на пользователя.
+    #Если второе место (second_place) не None, то liders добавляется информация о втором месте.
+    #Если третье место (third_place) не None, то liders добавляется информация о третьем месте.
+    if second_place is not None:
+        liders += second_place
+
+    if third_place is not None:
+        liders += third_place
+    #переменные keyboard_for_chanel и keyboard_for_bot, c клавиатурами для канала и бота для указанного lot_id.
+    keyboard_for_chanel = Card(lot_id).chanel_card().keyboard
+    keyboard_for_bot = Card(lot_id).bot_card().keyboard
+
+    chanel_message_id = buffer["Active"][str(lot_id)]["message"]
+
+    # print(buffer)
+
+    bot.edit_message_caption(caption=(text +
+                                      liders),
+                             chat_id=chanel,
+                             message_id=chanel_message_id,
+                             reply_markup=keyboard_for_chanel)    #для редактирования подписи сообщения в канале с указанными параметрами
+
+    for user_id, users_message in buffer["Active"][str(lot_id)]["user_opened"].items():
+        # здесь необходимо учитывать скрытую ставку
+        bot.edit_message_caption(caption=(text +
+                                          liders),  # прямо здесь добавлять скрытую ставку и лидеров
+                                 chat_id=user_id,
+                                 message_id=users_message,
+                                 reply_markup=keyboard_for_bot)
+        
+# Функция approvement для отмены или одобрения лота перед постом в канал
+def approvement(lot_id, call_id, case):
+    if case == "accept":
+
+        message = "Вы одобрили лот"
+        bot.answer_callback_query(callback_query_id=call_id, text=message)
+
+        buffer['Approved'].append(lot_id)
+
+        for user_id, message in buffer["Moderation"][str(lot_id)].items():
+            bot.delete_message(user_id, message)
+
+        del buffer["Moderation"][str(lot_id)]
+
+        send_lot(case="start_auction")
+
+    elif case == "decline":
+
+        message = "Вы отменили лот"
+        bot.answer_callback_query(callback_query_id=call_id, text=message)
+
+        for user_id, message in buffer["Moderation"][str(lot_id)].items():
+            bot.delete_message(user_id, message)
+
+        with con:
+            user_id = con.execute(queries['get_tg-id_by_lot-id'], [lot_id]).fetchall()[0][0]
+            lot_title = con.execute(queries['lot_title'], [lot_id]).fetchall()[0][0]
+
+        message = f"К сожалению ваш лот {lot_title} не прошёл проверку, свяжитесь с поддержкой"
+        bot.send_message(user_id, message)
+
+        del buffer["Moderation"][str(lot_id)]
+
+
+# Функция send_lot используются планировщиком для отправки и остановки лотов в канал
+def send_lot(case):
+    # Сообщение которое, отправляется перед стартом аукциона и закрепляется ежедневно
+    if case == "notification":
+        pinned_message = bot.send_message(chanel, texts_dict["start_auction"])
+        bot.pin_chat_message(chanel, pinned_message.id)
+
+    # Проверка админами со статусом SUPER_ADMIN или SUPPORT лотов перед постом
+    elif case == "approvement":
+        for lot_id in buffer["Lots_to_add"]:
+            keyboard = Support(lot_id).approvement().keyboard
+
+            with con:
+                lot_price = con.execute(queries["lot_price"], [lot_id]).fetchall()[0][0]
+                image_links = con.execute(queries["get_images_link"], [lot_id]).fetchall()[0]
+
+            text = lot_information(lot_id)
+            text += "Следующая ставка: " + str(lot_price) + "₽"
+
+            for user_id, values in administrators_dict.items():
+
+                for key, value in values.items():
+
+                    if value == "SUPER_ADMIN" or value == "SUPPORT":
+
+                        with open(image_links[0], 'rb') as image:
+
+                            message = bot.send_photo(chat_id=user_id,
+                                                     photo=image,
+                                                     caption=text,
+                                                     reply_markup=keyboard)
+
+                        if str(lot_id) not in buffer['Moderation'].keys():
+                            buffer['Moderation'].update({str(lot_id): {user_id: message.id}})
+                        else:
+                            buffer['Moderation'][str(lot_id)].update({user_id: message.id})
+
+        buffer['Lots_to_add'].clear()
+
+    # Отправка лота в канал в случае одобрение администратором
+    elif case == "start_auction":
+
+        for lot_id in buffer["Approved"]:
+            keyboard = Card(lot_id).chanel_card().keyboard
+
+            with con:
+                lot_price = con.execute(queries["lot_price"], [lot_id]).fetchall()[0][0]
+                image_links = con.execute(queries["get_images_link"], [lot_id]).fetchall()[0]
+
+            text = lot_information(lot_id)
+            text += "Следующая ставка: " + str(lot_price) + "₽"
+
+            with open(image_links[0], 'rb') as image:
+                message = bot.send_photo(chat_id=chanel, photo=image, caption=text, reply_markup=keyboard)
+
+            buffer["Active"].update({str(lot_id): {"message": message.id}})
+
+        buffer["Approved"].clear()
+
+        global timer_thread
+        if timer_thread is None or not timer_thread.is_alive():
+            timer_thread = threading.Thread(target=timer)
+            timer_thread.start()
+
+    # Завершение аукциона по истечению времени потока счетчика времени
+    if case == "stop_auction":
+        for lot_id in buffer["Active"].keys():
+            lot_message = buffer["Active"][str(lot_id)]["message"]
+
+            with con:
+                lot_price = con.execute(queries["lot_price"], [lot_id]).fetchall()[0][0]
+
+            text = lot_information(lot_id)
+            text += "Следующая ставка: " + str(lot_price) + "₽"
+
+            if "bids" not in buffer["Active"][lot_id].keys() or buffer["Active"][lot_id]["bids"] is None:
+                text += "\n\n🏁 Аукцион закончен. Победителей нет.."
+
+            else:
+                sorted_items = sorted(buffer["Active"][lot_id]["bids"].items(), key=lambda x: x[1], reverse=True)[0]
+                with con:
+                    user_id = con.execute(queries["user_id"], [sorted_items[0]]).fetchall()[0][0]
+                    user_link = con.execute(queries["users_link"], [sorted_items[0]]).fetchall()[0][0]
+                    sellers_link = con.execute(queries["lot_sellers_link"], [lot_id]).fetchall()[0][0]
+                    bid_id = con.execute(queries["get_bid_id"], [user_id, sorted_items[1]]).fetchall()[0][0]
+                    lot_title = con.execute(queries["lot_title"], [lot_id]).fetchall()[0][0]
+                    con.execute(queries["set_winner"], [user_id, lot_id, bid_id])
+
+                text_to_winner = texts_dict['notification_of_victory']
+
+                text_to_winner += ("\n\nИнформация о лоте:\n"
+                                   f"Название: {lot_title}\n"
+                                   f"Ваша ставка: {sorted_items[1]}₽\n"
+                                   f"Продавец: 👉 {sellers_link}")
+
+                bot.send_message(chat_id=sorted_items[0], text=text_to_winner)
+
+                text += f"\n\n🏆{sorted_items[1]}₽ {user_link[1:3]}***"
+
+            bot.edit_message_reply_markup(chat_id=chanel, message_id=lot_message, reply_markup=None)
+            bot.edit_message_caption(caption=text, chat_id=chanel, message_id=lot_message)
+
+            if "user_opened" in buffer["Active"][str(lot_id)].keys():
+                for user_id, message_id in buffer["Active"][str(lot_id)]["user_opened"].items():
+                    bot.edit_message_reply_markup(chat_id=user_id, message_id=message_id, reply_markup=None)
+                    bot.edit_message_caption(caption=text, chat_id=user_id, message_id=message_id)
+
+            buffer["Active"].clear()
+
 
     
 @bot.message_handler(content_types=['photo'])
@@ -558,6 +900,43 @@ def start(message):
         buffer["Lots_to_add"].append(1), buffer["Lots_to_add"].append(2)
         #Вызывается функция menu
         menu[message.text](telegram_id, "send", None, None)
+    
+    elif message.text.startswith("/start "):
+
+        lot_id = message.text.split()[-1]
+
+        keyboard = Card(lot_id).bot_card().keyboard
+
+        with con:
+            image_links = con.execute(queries["get_images_link"], [lot_id]).fetchall()[0]
+            lot_price = con.execute(queries["lot_price"], [lot_id]).fetchall()[0][0]
+
+        text = lot_information(lot_id)
+
+        if "bids" in buffer["Active"][str(lot_id)].keys():
+            last_bid = max(buffer["Active"][str(lot_id)]["bids"].values())
+            for user_id, user_bid in buffer["Active"][str(lot_id)]["bids"].items():
+                if user_bid == last_bid:
+                    with con:
+                        users_link = con.execute(queries['users_link'], [user_id]).fetchall()[0][0]
+
+            text += "Следующая ставка: " + str(last_bid + 100) + "₽" + "\n\n"
+            text += f"\n\n🥇 {last_bid}₽ {users_link[1:3]}***"
+
+        else:
+            text += "Следующая ставка: " + str(lot_price) + "₽" + "\n\n"
+
+        if "user_opened" in buffer["Active"][str(lot_id)].keys():
+            if telegram_id in buffer["Active"][str(lot_id)]["user_opened"].keys():
+                bot.delete_message(telegram_id, buffer["Active"][str(lot_id)]["user_opened"][telegram_id])
+
+        with open(image_links[0], 'rb') as image:
+            message = bot.send_photo(chat_id=telegram_id, photo=image, caption=text, reply_markup=keyboard)
+
+        if "user_opened" not in buffer["Active"][str(lot_id)].keys():
+            buffer["Active"][str(lot_id)].update({"user_opened": {telegram_id: message.id}})
+        else:
+            buffer["Active"][str(lot_id)]["user_opened"].update({telegram_id: message.id})
             
     
     
@@ -578,13 +957,44 @@ def query_handler(call):
                 '/customer': (winner_info, (chat_id, message_id, button_info, call.id)),
                 '/history': (show_history, (chat_id, message_id, button_info, call.id)),
                 '/delete': (delete_lot, (chat_id, message_id, button_info, call.id)),
+                #настройка карточки лота
+                '/card': (card_info, (call.id, button_info)),
+                '/card_media': (card_media, (chat_id, message_id, button_info, call.id)),
+                '/card_bids': (card_bids, (chat_id, button_info, call.id)),
+                #подтверждение/отмена публикации лота
+                '/accept': (approvement, (button_info, call.id, 'accept')),
+                '/decline': (approvement, (button_info, call.id, 'decline')),
+                '/bids':(), #!!!!доработать кнопку "удалить ставку" в истории ставок
                 }
     
     function, args = callback[flag][0], callback[flag][1]
 
     function(*args)
-    
-  
+ 
+def timer():
+    global remaining_time
+    end_time = datetime.datetime.now() + timedelta(hours=24)
+
+    while datetime.datetime.now() < end_time:
+        remaining_time = end_time - datetime.datetime.now()
+
+        time.sleep(1)
+
+    send_lot("stop_auction")
+
+
+def run_scheduler():
+    while True:
+        schedule.run_pending()
+ 
 print("Ready")
+
+schedule.every().day.at('11:32').do(send_lot, "notification")
+schedule.every().day.at('11:33').do(send_lot, "approvement")
+
 update_administrator(case='Обновить администраторов')
-bot.infinity_polling()
+
+if __name__ == '__main__':
+    scheduler_thread = threading.Thread(target=run_scheduler)
+    scheduler_thread.start()
+    bot.infinity_polling()
