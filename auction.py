@@ -83,6 +83,13 @@ with con:
                 "/start for admin": ('в бот аукционов @Auction_monett '
                                    'Выберите необходимыe для вас действия:'),
                 "admins_settings": "Выберите необходимые действия с администраторами:",
+                "add_admin": "Поиск пользователя по ссылке:",
+
+                "change_admin": "Выберите администратора которого хотите изменить",
+  
+                "delete_admin": "Выберите администратора которого хотите удалить",
+                "changing_options": "Выберите необходимое что хотите изменить",
+
                 "/start for user": ('Привет ,я бот аукционов @Auction_monett\n'
                                   'Я помогу вам следить за выбранными лотами ,и регулировать\n'
                                   'ход аукциона.А так же буду следить за вашими накопленными\n'
@@ -176,6 +183,7 @@ with con:
 
 # Словарь который, содержит в себе ссылки на объекты Inline клавиатур telebot.types
 actions = { 
+    "admins_settings": SuperAdmin().options().keyboard,
     # Здесь только главное меню
     "rules": MainMenu().get_menu().keyboard,
     # Здесь только главное меню и написать в поддержку
@@ -835,6 +843,59 @@ def send_lot(case):
 
 
     
+#НАСТРОЙКА АДМИНИСТРАТОРОВ
+def super_admin(telegram_id, message_id, button_info, call_id):
+    bot.answer_callback_query(callback_query_id=call_id, )
+    text = None
+    if button_info == "add_admin":
+        text = texts_dict[button_info]
+        keyboard = SuperAdmin().add().keyboard
+        # Вызов клавиатуры с кнопкой поиск по Telegram_link
+
+    elif button_info == "change_admin":
+        text = texts_dict[button_info]
+        with con:
+            admins = con.execute(queries['admins_settings']).fetchall()
+            keyboard = SuperAdmin().changes(admins).keyboard
+
+        # Найти всех администраторов и передать в клавиатуру
+        # Нужны данные ADMINISTRATORS.ID USERS.TELEGRAM_LINK
+
+    elif button_info == "delete_admin":
+        text = texts_dict[button_info]
+        with con:
+            admins = con.execute(queries['admins_settings']).fetchall()
+            keyboard = SuperAdmin().delete(admins).keyboard
+
+        # Найти всех администраторов и передать в клавиатуру
+        # Нужны данные ADMINISTRATORS.ID USERS.TELEGRAM_LINK
+
+    bot.edit_message_text(chat_id=telegram_id, message_id=message_id, text=text, reply_markup=keyboard)    
+  
+def add_admin(telegram_id, message_id, button_info, call_id):
+    bot.answer_callback_query(callback_query_id=call_id, )
+    return ""
+
+
+def change_admin(telegram_id, message_id, admin_id, call_id, case):
+    bot.answer_callback_query(callback_query_id=call_id, )
+    register_handler = []
+    if case == "options":
+        keyboard = SuperAdmin().changes_in_admin(admin_id).keyboard
+        text = texts_dict['changing_options']
+
+    # bot.edit_message_text(chat_id=telegram_id, message_id=message_id, text=text, reply_markup=keyboard)
+
+    if case == "status":
+        print("")
+    if case == "balance":
+        print("")
+
+
+def delete_admin(telegram_id, message_id, admin_id, call_id):
+    bot.answer_callback_query(callback_query_id=call_id, )
+    return ""
+    
 @bot.message_handler(content_types=['photo'])
 def handle_image(message):
     telegram_id = message.from_user.id
@@ -964,7 +1025,14 @@ def query_handler(call):
                 #подтверждение/отмена публикации лота
                 '/accept': (approvement, (button_info, call.id, 'accept')),
                 '/decline': (approvement, (button_info, call.id, 'decline')),
-                '/bids':(), #!!!!доработать кнопку "удалить ставку" в истории ставок
+                '/bids':(),                               #!!!!доработать кнопку "удалить ставку" в истории ставок
+                #настройка админов
+                '/SuperAdmin': (super_admin, (chat_id, message_id, button_info, call.id)),
+                '/admin_add': (add_admin, (chat_id, message_id, button_info, call.id)),
+                '/admin_changes': (change_admin, (chat_id, message_id, button_info, call.id, "options")),
+                '/change_status': (change_admin, (chat_id, message_id, button_info, call.id, "status")),
+                '/change_balance': (change_admin, (chat_id, message_id, button_info, call.id, "balance")),
+                '/admin_delete': (delete_admin, (chat_id, message_id, button_info, call.id)),
                 }
     
     function, args = callback[flag][0], callback[flag][1]

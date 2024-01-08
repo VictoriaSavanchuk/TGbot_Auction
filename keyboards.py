@@ -202,3 +202,48 @@ class Support:  #поддержка
         decline = InlineKeyboardButton("Отклонить", callback_data=json.dumps(['/decline', self.lot_id]))
         self.keyboard.add(decline, accept, row_width=2)
         return self
+    
+class SuperAdmin:
+
+    def __init__(self):
+        self.keyboard = InlineKeyboardMarkup()
+
+    def options(self):
+        add = InlineKeyboardButton("Добавить администратора", callback_data=json.dumps(['/SuperAdmin', "add_admin"]))
+        change = InlineKeyboardButton("Изменить администратора", callback_data=json.dumps(['/SuperAdmin', "change_admin"]))
+        delete = InlineKeyboardButton("Удалить администратора", callback_data=json.dumps(['/SuperAdmin', "delete_admin"]))
+        home = InlineKeyboardButton("Главное меню", callback_data=json.dumps(["/home", "menu"]))
+        self.keyboard.add(add, change, delete, home, row_width=1)
+        return self
+
+    def add(self):
+        telegram_link = InlineKeyboardButton("Найти пользователя по ссылке",
+                                             callback_data=json.dumps(['/admin_add', "telegram_link"]))
+        back = InlineKeyboardButton("Назад", callback_data=json.dumps(['/start', "admins_settings"]))
+        self.keyboard.add(telegram_link, back, row_width=1)
+        return self
+
+    def changes(self, admins):
+        for admin_id, users_link in admins:
+            admin = InlineKeyboardButton(users_link, callback_data=json.dumps(['/admin_changes', admin_id]))
+            self.keyboard.add(admin, row_width=1)
+
+        back = InlineKeyboardButton("Назад", callback_data=json.dumps(['/start', "admins_settings"]))
+        self.keyboard.add(back,row_width=1)
+        return self
+
+    def changes_in_admin(self, admin_id):
+        status = InlineKeyboardButton("Изменить статус", callback_data=json.dumps(['/change_status', admin_id]))
+        balance = InlineKeyboardButton("Изменить баланс", callback_data=json.dumps(['/change_balance', admin_id]))
+        back = InlineKeyboardButton("Назад", callback_data=json.dumps(['/SuperAdmin', "change_admin"]))
+        self.keyboard.add(status, balance, back, row_width=1)
+        return self
+
+    def delete(self, admins):
+        for admin_id, users_link in admins:
+            admin = InlineKeyboardButton(users_link, callback_data=json.dumps(['/admin_delete', admin_id]))
+            self.keyboard.add(admin, row_width=1)
+
+        back = InlineKeyboardButton("Назад", callback_data=json.dumps(['/start', "admins_settings"]))
+        self.keyboard.add(back, row_width=1)
+        return self
